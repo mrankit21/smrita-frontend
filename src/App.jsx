@@ -21,6 +21,7 @@ import Signup from './pages/Signup';
 import Orders from './pages/Orders';
 import Contact from './pages/Contact';
 import OrderSuccess from './pages/OrderSuccess';
+import AdminPanel from './pages/AdminPanel';
 
 function App() {
   return (
@@ -44,6 +45,7 @@ function App() {
                   <Route path="/orders" element={<Orders />} />
                   <Route path="/contact" element={<Contact />} />
                   <Route path="/order-success" element={<OrderSuccess />} />
+                  <Route path="/admin" element={<AdminPanel />} />
                 </Routes>
               </main>
               <Footer />

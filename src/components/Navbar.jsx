@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { ShoppingCart, Heart, User, Menu, X, LogOut, Package } from 'lucide-react';
+import { ShoppingCart, Heart, User, Menu, X, LogOut, Package, Settings } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
 import { useAuth } from '../context/AuthContext';
@@ -123,6 +123,11 @@ const Navbar = () => {
                       <Link to="/orders" className="flex items-center gap-2 px-4 py-3 text-yellow-200/70 hover:text-yellow-400 hover:bg-yellow-600/5 transition-colors font-body text-sm">
                         <Package size={14} /> My Orders
                       </Link>
+                      {user.role === 'admin' && (
+                        <Link to="/admin" className="flex items-center gap-2 px-4 py-3 text-yellow-400 hover:text-yellow-300 hover:bg-yellow-600/5 transition-colors font-body text-sm">
+                          <Settings size={14} /> Admin Panel
+                        </Link>
+                      )}
                       <button
                         onClick={handleLogout}
                         className="w-full flex items-center gap-2 px-4 py-3 text-red-400/70 hover:text-red-400 hover:bg-red-600/5 transition-colors font-body text-sm"
@@ -161,6 +166,11 @@ const Navbar = () => {
                 {link.label}
               </Link>
             ))}
+            {user?.role === 'admin' && (
+              <Link to="/admin" className="nav-link text-base py-1 text-yellow-400">
+                Admin Panel
+              </Link>
+            )}
             {!user && (
               <>
                 <Link to="/login" className="nav-link text-base py-1">Login</Link>

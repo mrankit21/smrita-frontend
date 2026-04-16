@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Star, Flame, Leaf, Shield } from 'lucide-react';
-import { PRODUCTS } from '../utils/products';
+import { productAPI } from '../utils/api';
 import ProductCard from '../components/ProductCard';
 
 // Decorative SVG mandala
@@ -28,12 +28,28 @@ const Mandala = () => (
 
 const Home = () => {
   const [visible, setVisible] = useState(false);
-  const featuredProducts = PRODUCTS.filter(p => p.featured).slice(0, 3);
-  const popularProducts = PRODUCTS.slice(0, 6);
+  const [featuredProducts, setFeaturedProducts] = useState([]);
+  const [allProducts, setAllProducts] = useState([]);
 
   useEffect(() => {
     const timer = setTimeout(() => setVisible(true), 100);
     return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    // Featured products fetch karo
+    productAPI.getAll({ featured: true, limit: 3 })
+      .then(({ data }) => {
+        if (data.success) setFeaturedProducts(data.products);
+      })
+      .catch(() => {});
+
+    // All products fetch karo (first 6)
+    productAPI.getAll({ limit: 6 })
+      .then(({ data }) => {
+        if (data.success) setAllProducts(data.products);
+      })
+      .catch(() => {});
   }, []);
 
   const features = [
@@ -47,15 +63,12 @@ const Home = () => {
     <div className="overflow-hidden">
       {/* ─── HERO ─── */}
       <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
-        {/* Background layers */}
         <div className="absolute inset-0 bg-gradient-to-b from-black via-[#0d0800] to-[#0a0a0a]" />
 
-        {/* Mandala decoration */}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] mandala-rotate pointer-events-none">
           <Mandala />
         </div>
 
-        {/* Smoke particles */}
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 flex gap-8 pointer-events-none">
           {[0, 1, 2].map(i => (
             <div
@@ -70,12 +83,10 @@ const Home = () => {
           ))}
         </div>
 
-        {/* Radial glow */}
         <div className="absolute inset-0 pointer-events-none"
           style={{ background: 'radial-gradient(ellipse 60% 50% at 50% 50%, rgba(180,130,0,0.08) 0%, transparent 70%)' }}
         />
 
-        {/* Hero content */}
         <div className={`relative z-10 text-center px-6 transition-all duration-1000 ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}>
           <p className="font-body text-xs tracking-[0.5em] text-yellow-700 uppercase mb-6 animate-fade-in">
             ✦ Sacred Fragrances of India ✦
@@ -108,7 +119,6 @@ const Home = () => {
             </Link>
           </div>
 
-          {/* Combo highlight */}
           <div className="mt-10 inline-block border border-yellow-700/30 bg-yellow-900/10 px-6 py-3">
             <p className="font-body text-xs text-yellow-600/80 tracking-widest">
               🔥 COMBO DEAL · Any 3 Products for ₹250 · Save ₹50
@@ -116,7 +126,6 @@ const Home = () => {
           </div>
         </div>
 
-        {/* Scroll indicator */}
         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 animate-bounce">
           <div className="w-px h-10 bg-gradient-to-b from-yellow-600/50 to-transparent" />
         </div>
@@ -143,15 +152,9 @@ const Home = () => {
         <div className="container-custom relative z-10">
           <div className="border border-yellow-600/30 bg-gradient-to-r from-yellow-900/10 via-yellow-800/5 to-yellow-900/10 p-8 md:p-12 text-center">
             <p className="font-body text-xs tracking-[0.4em] text-yellow-700 uppercase mb-4">Exclusive Offer</p>
-            <h2 className="font-serif text-4xl md:text-6xl gold-shimmer-text mb-4">
-              3 for ₹250
-            </h2>
-            <p className="font-sans text-lg text-yellow-200/50 italic mb-2">
-              Pick any 3 incense sticks and save ₹50
-            </p>
-            <p className="font-body text-xs text-yellow-700/60 mb-8">
-              Mix and match freely · Discount applied automatically at checkout
-            </p>
+            <h2 className="font-serif text-4xl md:text-6xl gold-shimmer-text mb-4">3 for ₹250</h2>
+            <p className="font-sans text-lg text-yellow-200/50 italic mb-2">Pick any 3 incense sticks and save ₹50</p>
+            <p className="font-body text-xs text-yellow-700/60 mb-8">Mix and match freely · Discount applied automatically at checkout</p>
             <div className="flex flex-wrap items-center justify-center gap-4 md:gap-8 mb-8">
               {[
                 { label: 'Individual Price', value: '₹100 each' },
@@ -185,7 +188,7 @@ const Home = () => {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {featuredProducts.map(product => (
-              <ProductCard key={product.id} product={product} />
+              <ProductCard key={product._id} product={product} />
             ))}
           </div>
         </div>
@@ -221,7 +224,6 @@ const Home = () => {
                   <p className="font-body text-xs tracking-[0.3em] text-yellow-700/50 uppercase mt-2">Sanskrit · To Remember</p>
                 </div>
               </div>
-              {/* Corner ornaments */}
               {['top-0 left-0', 'top-0 right-0', 'bottom-0 left-0', 'bottom-0 right-0'].map((pos, i) => (
                 <div key={i} className={`absolute ${pos} w-4 h-4 border-yellow-600/40 ${i < 2 ? 'border-t' : 'border-b'} ${i % 2 === 0 ? 'border-l' : 'border-r'}`} />
               ))}
@@ -238,8 +240,8 @@ const Home = () => {
             <h2 className="section-title">All Fragrances</h2>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
-            {popularProducts.map(product => (
-              <ProductCard key={product.id} product={product} />
+            {allProducts.map(product => (
+              <ProductCard key={product._id} product={product} />
             ))}
           </div>
           <div className="text-center">
@@ -269,9 +271,7 @@ const Home = () => {
                     <Star key={j} size={12} className="text-yellow-500 fill-yellow-500" />
                   ))}
                 </div>
-                <p className="font-sans text-yellow-200/60 italic leading-relaxed mb-6 text-sm">
-                  "{t.review}"
-                </p>
+                <p className="font-sans text-yellow-200/60 italic leading-relaxed mb-6 text-sm">"{t.review}"</p>
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 gold-gradient rounded-full flex items-center justify-center text-black font-bold text-sm">
                     {t.name.charAt(0)}

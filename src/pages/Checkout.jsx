@@ -1,15 +1,46 @@
 // ================================================================
 // File: smrita/src/pages/Checkout.jsx
-// UPDATED: Creates real order via backend API
+// FIXED:
+//   1. Field component moved OUTSIDE — fixes typing/focus bug
+//   2. Razorpay UPI/Card flow properly integrated
+//   3. MongoDB _id fetched from backend before order
 // ================================================================
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
-import { orderAPI, productAPI } from '../utils/api';
+import { orderAPI, productAPI, paymentAPI } from '../utils/api';
 import { Sparkles, Lock } from 'lucide-react';
 import toast from 'react-hot-toast';
+
+// ✅ FIX 1: Field OUTSIDE component — re-render pe focus lost nahi hoga
+const Field = ({ label, name, type = 'text', placeholder, half, value, onChange, error }) => (
+  <div className={half ? 'col-span-1' : 'col-span-2'}>
+    <label className="block font-body text-xs tracking-[0.2em] text-yellow-600/60 uppercase mb-2">{label}</label>
+    <input
+      type={type}
+      name={name}
+      value={value}
+      onChange={onChange}
+      placeholder={placeholder}
+      autoComplete="off"
+      className={`input-gold ${error ? 'border-red-500/60' : ''}`}
+    />
+    {error && <p className="mt-1 font-body text-xs text-red-400">{error}</p>}
+  </div>
+);
+
+// ✅ FIX 2: Razorpay UPI/Card flow
+const loadRazorpayScript = () =>
+  new Promise((resolve) => {
+    if (window.Razorpay) return resolve(true);
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
 
 const Checkout = () => {
   const { items, actualTotal, regularTotal, savings, hasCombo, clearCart } = useCart();
@@ -29,7 +60,6 @@ const Checkout = () => {
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
 
-  // Redirect if not logged in
   React.useEffect(() => {
     if (!user) {
       toast.error('Please login to checkout');
@@ -37,11 +67,12 @@ const Checkout = () => {
     }
   }, [user]);
 
-  const handleChange = (e) => {
+  // ✅ useCallback taaki handleChange stable rahe
+  const handleChange = useCallback((e) => {
     const { name, value } = e.target;
     setForm(prev => ({ ...prev, [name]: value }));
-    if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
-  };
+    setErrors(prev => ({ ...prev, [name]: '' }));
+  }, []);
 
   const validate = () => {
     const errs = {};
@@ -56,6 +87,7 @@ const Checkout = () => {
     return errs;
   };
 
+  // ✅ FIX 3: Pehle order banao, phir payment karo
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (items.length === 0) { toast.error('Your cart is empty'); return; }
@@ -64,23 +96,19 @@ const Checkout = () => {
 
     setLoading(true);
     try {
-      // ✅ FIX: Backend se real MongoDB _id fetch karo
-      // Cart mein local numeric id (1,2,3) hota hai — backend ko ObjectId chahiye
+      // Step 1: Backend se real MongoDB _id fetch karo
       const productRes = await productAPI.getAll();
       const backendProducts = productRes.data?.products || [];
-      
+
       const orderItems = items.map(item => {
-        // Cart item ka name match karo backend products se
         const backendProduct = backendProducts.find(
           p => p.name.toLowerCase() === item.name.toLowerCase()
         );
-        
         if (!backendProduct) {
-          throw new Error(`Product "${item.name}" not found on server. Please refresh and try again.`);
+          throw new Error(`Product "${item.name}" not found. Please refresh and try again.`);
         }
-        
         return {
-          product: backendProduct._id,  // ✅ Real MongoDB ObjectId
+          product: backendProduct._id,
           name: item.name,
           image: item.image,
           price: item.price,
@@ -88,24 +116,90 @@ const Checkout = () => {
         };
       });
 
-      const { data } = await orderAPI.create({
+      const shippingAddress = {
+        name: form.name,
+        phone: form.phone,
+        address: form.address,
+        city: form.city,
+        state: form.state,
+        pincode: form.pincode,
+      };
+
+      // Step 2: COD — seedha order place karo
+      if (form.paymentMethod === 'cod') {
+        const { data } = await orderAPI.create({
+          items: orderItems,
+          shippingAddress,
+          paymentMethod: 'cod',
+        });
+        if (data.success) {
+          clearCart();
+          toast.success('Order placed! Confirmation email aayegi.');
+          navigate('/order-success', { state: { order: data.order } });
+        }
+        return;
+      }
+
+      // Step 3: UPI / Card — Razorpay flow
+      const scriptLoaded = await loadRazorpayScript();
+      if (!scriptLoaded) {
+        toast.error('Payment gateway load nahi hua. Check internet connection.');
+        return;
+      }
+
+      // Pehle order DB mein create karo
+      const { data: orderData } = await orderAPI.create({
         items: orderItems,
-        shippingAddress: {
-          name: form.name,
-          phone: form.phone,
-          address: form.address,
-          city: form.city,
-          state: form.state,
-          pincode: form.pincode,
-        },
+        shippingAddress,
         paymentMethod: form.paymentMethod,
       });
 
-      if (data.success) {
-        clearCart();
-        toast.success('Order placed successfully!');
-        navigate('/order-success', { state: { order: data.order } });
-      }
+      if (!orderData.success) throw new Error('Order creation failed');
+      const createdOrder = orderData.order;
+
+      // Razorpay payment order banao
+      const { data: rzpData } = await paymentAPI.createOrder(actualTotal);
+
+      const options = {
+        key: rzpData.key,
+        amount: rzpData.order.amount,
+        currency: 'INR',
+        name: 'SMRITA',
+        description: 'Sacred Fragrances',
+        order_id: rzpData.order.id,
+        prefill: {
+          name: form.name,
+          email: user?.email || '',
+          contact: form.phone,
+        },
+        // ✅ UPI select karo toh UPI hi show hoga
+        method: form.paymentMethod === 'upi' ? { upi: true, card: false, netbanking: false, wallet: false } : undefined,
+        theme: { color: '#f4c430' },
+        handler: async (response) => {
+          try {
+            const { data: verifyData } = await paymentAPI.verify({
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+              orderId: createdOrder._id,
+            });
+            if (verifyData.success) {
+              clearCart();
+              toast.success('Payment successful! Confirmation email aayegi.');
+              navigate('/order-success', { state: { order: verifyData.order } });
+            }
+          } catch {
+            toast.error('Payment verification failed. Contact support.');
+          }
+        },
+        modal: {
+          ondismiss: () => toast('Payment cancelled.'),
+        },
+      };
+
+      const rzp = new window.Razorpay(options);
+      rzp.open();
+
     } catch (err) {
       const msg = err.message || err.response?.data?.message || 'Failed to place order. Please try again.';
       toast.error(msg);
@@ -113,21 +207,6 @@ const Checkout = () => {
       setLoading(false);
     }
   };
-
-  const Field = ({ label, name, type = 'text', placeholder, half }) => (
-    <div className={half ? 'col-span-1' : 'col-span-2'}>
-      <label className="block font-body text-xs tracking-[0.2em] text-yellow-600/60 uppercase mb-2">{label}</label>
-      <input
-        type={type}
-        name={name}
-        value={form[name]}
-        onChange={handleChange}
-        placeholder={placeholder}
-        className={`input-gold ${errors[name] ? 'border-red-500/60' : ''}`}
-      />
-      {errors[name] && <p className="mt-1 font-body text-xs text-red-400">{errors[name]}</p>}
-    </div>
-  );
 
   return (
     <div className="pt-24 pb-20 min-h-screen">
@@ -145,8 +224,8 @@ const Checkout = () => {
               <div className="glass-card gold-border p-6">
                 <h2 className="font-body text-xs tracking-[0.3em] text-yellow-600 uppercase mb-5 font-bold">Personal Information</h2>
                 <div className="grid grid-cols-2 gap-4">
-                  <Field label="Full Name" name="name" placeholder="Your full name" />
-                  <Field label="Phone Number" name="phone" placeholder="10-digit mobile number" />
+                  <Field label="Full Name" name="name" placeholder="Your full name" value={form.name} onChange={handleChange} error={errors.name} />
+                  <Field label="Phone Number" name="phone" placeholder="10-digit mobile number" value={form.phone} onChange={handleChange} error={errors.phone} />
                 </div>
               </div>
 
@@ -154,10 +233,10 @@ const Checkout = () => {
               <div className="glass-card gold-border p-6">
                 <h2 className="font-body text-xs tracking-[0.3em] text-yellow-600 uppercase mb-5 font-bold">Shipping Address</h2>
                 <div className="grid grid-cols-2 gap-4">
-                  <Field label="Full Address" name="address" placeholder="House no., Street, Area" />
-                  <Field label="City" name="city" placeholder="City" half />
-                  <Field label="State" name="state" placeholder="State" half />
-                  <Field label="PIN Code" name="pincode" placeholder="6-digit PIN" half />
+                  <Field label="Full Address" name="address" placeholder="House no., Street, Area" value={form.address} onChange={handleChange} error={errors.address} />
+                  <Field label="City" name="city" placeholder="City" half value={form.city} onChange={handleChange} error={errors.city} />
+                  <Field label="State" name="state" placeholder="State" half value={form.state} onChange={handleChange} error={errors.state} />
+                  <Field label="PIN Code" name="pincode" placeholder="6-digit PIN" half value={form.pincode} onChange={handleChange} error={errors.pincode} />
                 </div>
               </div>
 
@@ -167,8 +246,8 @@ const Checkout = () => {
                 <div className="space-y-3">
                   {[
                     { value: 'cod', label: 'Cash on Delivery', desc: 'Pay when your order arrives' },
-                    { value: 'upi', label: 'UPI Payment', desc: 'Pay via any UPI app' },
-                    { value: 'card', label: 'Credit / Debit Card', desc: 'Secure card payment' },
+                    { value: 'upi', label: 'UPI Payment', desc: 'Pay via any UPI app — GPay, PhonePe, Paytm' },
+                    { value: 'card', label: 'Credit / Debit Card', desc: 'Secure card payment via Razorpay' },
                   ].map(method => (
                     <label key={method.value} className={`flex items-center gap-4 p-4 border cursor-pointer transition-colors ${form.paymentMethod === method.value ? 'border-yellow-500/50 bg-yellow-900/10' : 'border-yellow-800/20 hover:border-yellow-700/40'}`}>
                       <input
@@ -186,6 +265,11 @@ const Checkout = () => {
                     </label>
                   ))}
                 </div>
+                {form.paymentMethod !== 'cod' && (
+                  <p className="mt-3 font-body text-xs text-yellow-600/50 italic">
+                    * "Place Order" pe click karne ke baad Razorpay payment window khulegi
+                  </p>
+                )}
               </div>
             </div>
 
@@ -241,10 +325,10 @@ const Checkout = () => {
                   {loading ? (
                     <>
                       <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
-                      Placing Order...
+                      Processing...
                     </>
                   ) : (
-                    <><Lock size={14} /> Place Order</>
+                    <><Lock size={14} /> {form.paymentMethod === 'cod' ? 'Place Order' : 'Pay Now'}</>
                   )}
                 </button>
 

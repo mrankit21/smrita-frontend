@@ -10,7 +10,27 @@ import axios from 'axios';
 const API = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
   headers: { 'Content-Type': 'application/json' },
+  timeout: 60000, // 60 seconds — Render free tier cold start ke liye
 });
+
+// Render free tier pe backend "sleep" ho jaata hai — retry logic
+const retryRequest = async (error) => {
+  const config = error.config;
+  if (!config || config._retryCount >= 2) return Promise.reject(error);
+  
+  // Only retry on network error or 502/503/504 (server waking up)
+  const isRetryable =
+    !error.response ||
+    [502, 503, 504].includes(error.response?.status);
+  
+  if (!isRetryable) return Promise.reject(error);
+  
+  config._retryCount = (config._retryCount || 0) + 1;
+  const delay = config._retryCount * 3000; // 3s, then 6s
+  
+  await new Promise(res => setTimeout(res, delay));
+  return API(config);
+};
 
 // Auto-attach JWT token to every request
 API.interceptors.request.use((config) => {
@@ -19,16 +39,17 @@ API.interceptors.request.use((config) => {
   return config;
 }, (error) => Promise.reject(error));
 
-// Handle 401 globally — auto logout
+// Handle 401 globally — auto logout + retry for network errors
 API.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem('smrita_token');
       localStorage.removeItem('smrita_user');
       window.location.href = '/login';
+      return Promise.reject(error);
     }
-    return Promise.reject(error);
+    return retryRequest(error);
   }
 );
 

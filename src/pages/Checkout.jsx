@@ -7,7 +7,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
-import { orderAPI } from '../utils/api';
+import { orderAPI, productAPI } from '../utils/api';
 import { Sparkles, Lock } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -64,14 +64,29 @@ const Checkout = () => {
 
     setLoading(true);
     try {
-      // Format items for backend (needs product._id)
-      const orderItems = items.map(item => ({
-        product: item._id || item.id,   // MongoDB _id
-        name: item.name,
-        image: item.image,
-        price: item.price,
-        quantity: item.quantity,
-      }));
+      // ✅ FIX: Backend se real MongoDB _id fetch karo
+      // Cart mein local numeric id (1,2,3) hota hai — backend ko ObjectId chahiye
+      const productRes = await productAPI.getAll();
+      const backendProducts = productRes.data?.products || [];
+      
+      const orderItems = items.map(item => {
+        // Cart item ka name match karo backend products se
+        const backendProduct = backendProducts.find(
+          p => p.name.toLowerCase() === item.name.toLowerCase()
+        );
+        
+        if (!backendProduct) {
+          throw new Error(`Product "${item.name}" not found on server. Please refresh and try again.`);
+        }
+        
+        return {
+          product: backendProduct._id,  // ✅ Real MongoDB ObjectId
+          name: item.name,
+          image: item.image,
+          price: item.price,
+          quantity: item.quantity,
+        };
+      });
 
       const { data } = await orderAPI.create({
         items: orderItems,
@@ -92,7 +107,7 @@ const Checkout = () => {
         navigate('/order-success', { state: { order: data.order } });
       }
     } catch (err) {
-      const msg = err.response?.data?.message || 'Failed to place order. Please try again.';
+      const msg = err.message || err.response?.data?.message || 'Failed to place order. Please try again.';
       toast.error(msg);
     } finally {
       setLoading(false);

@@ -40,13 +40,19 @@ const Login = () => {
       toast.success(`Welcome back, ${user.name}!`);
       navigate(from, { replace: true });
     } catch (err) {
-      const msg = err.response?.data?.message || err.message || 'Login failed. Please try again.';
-      toast.error(msg);
-      // Highlight fields on auth error
-      if (msg.toLowerCase().includes('password')) {
-        setErrors({ password: 'Incorrect password' });
-      } else if (msg.toLowerCase().includes('email')) {
-        setErrors({ email: 'Email not found' });
+      // Network error = Render backend waking up se ho sakta hai
+      const isNetworkError = !err.response && (err.code === 'ERR_NETWORK' || err.message === 'Network Error' || err.code === 'ECONNABORTED');
+      
+      if (isNetworkError) {
+        toast.error('Server starting up... Please try again in 30 seconds. (Free server wakes up on first request)', { duration: 6000 });
+      } else {
+        const msg = err.response?.data?.message || err.message || 'Login failed. Please try again.';
+        toast.error(msg);
+        if (msg.toLowerCase().includes('password')) {
+          setErrors({ password: 'Incorrect password' });
+        } else if (msg.toLowerCase().includes('email')) {
+          setErrors({ email: 'Email not found' });
+        }
       }
     } finally {
       setLoading(false);
